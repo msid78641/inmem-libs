@@ -1,5 +1,10 @@
 module inmem
 
-go 1.23.4
+go 1.24.0
 
-require github.com/allegro/bigcache/v3 v3.1.0 // indirect
+toolchain go1.24.9
+
+require (
+	github.com/allegro/bigcache/v3 v3.1.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
+)

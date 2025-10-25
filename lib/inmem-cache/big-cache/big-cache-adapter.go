@@ -2,32 +2,36 @@ package big_cache
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/allegro/bigcache/v3"
 	cache "inmem/lib/inmem-cache"
 )
 
 func Serialize(cacheEntry *cache.CacheEntry) ([]byte, error) {
-	val, err := json.Marshal(cacheEntry)
+	val, err := json.Marshal(*cacheEntry)
 	if err != nil {
+		fmt.Println("Marhsalling error")
+		return nil, err
 		// handle error
 	}
 	return val, nil
 }
 
 func Deserialize(cacheEntrySerialized []byte) (*cache.CacheEntry, error) {
-	var cacheEntry *cache.CacheEntry
+	var cacheEntry cache.CacheEntry
 	err := json.Unmarshal(cacheEntrySerialized, &cacheEntry)
 	if err != nil {
+		fmt.Println("Error via desiralizing ", err)
 		return nil, err
 	}
-	return cacheEntry, nil
+	return &cacheEntry, nil
 }
 
 type BigCacheAdapter struct {
 	cache *bigcache.BigCache
 }
 
-func (bigCache *BigCacheAdapter) Load(key string) (*cache.CacheEntry, error) {
+func (bigCache *BigCacheAdapter) Get(key string) (*cache.CacheEntry, error) {
 	value, err := bigCache.cache.Get(key)
 	if err != nil {
 		return nil, err

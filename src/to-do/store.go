@@ -6,12 +6,18 @@ import (
 	"time"
 )
 
+const (
+	CacheTTL = time.Second * 3
+)
+
 var bigCache = big_cache.CreateBigCache().
 	Shards(4).
 	LifeWindow(-1).
-	EnableStats(true).
-	Verbose(true).
+	EnableStats(false).
+	Verbose(false).
 	CacheMemoryLimit(2).
 	Build()
 
-var ToDoListStore = cache.CreateCache(bigCache, time.Second*10)
+var ToDoListStore = cache.GetCache(bigCache, CacheTTL).
+	WithLoader(GetToDoLoader).
+	WithStaleResponseTtl(time.Second * 3)

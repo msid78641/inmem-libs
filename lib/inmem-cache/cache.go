@@ -9,7 +9,7 @@ type Cache struct {
 	ttl          time.Duration
 }
 
-func createCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration) *Cache {
+func CreateCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration) *Cache {
 	return &Cache{
 		cacheAdaptor: cacheAdaptor,
 		ttl:          ttl,

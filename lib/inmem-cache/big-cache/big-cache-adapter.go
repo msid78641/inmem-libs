@@ -1,13 +1,12 @@
-package inmem_cache
+package big_cache
 
 import (
-	"context"
 	"encoding/json"
 	"github.com/allegro/bigcache/v3"
-	"time"
+	cache "inmem/lib/inmem-cache"
 )
 
-func Serialize(cacheEntry *CacheEntry) ([]byte, error) {
+func Serialize(cacheEntry *cache.CacheEntry) ([]byte, error) {
 	val, err := json.Marshal(cacheEntry)
 	if err != nil {
 		// handle error
@@ -15,8 +14,8 @@ func Serialize(cacheEntry *CacheEntry) ([]byte, error) {
 	return val, nil
 }
 
-func Deserialize(cacheEntrySerialized []byte) (*CacheEntry, error) {
-	var cacheEntry *CacheEntry
+func Deserialize(cacheEntrySerialized []byte) (*cache.CacheEntry, error) {
+	var cacheEntry *cache.CacheEntry
 	err := json.Unmarshal(cacheEntrySerialized, &cacheEntry)
 	if err != nil {
 		return nil, err
@@ -28,22 +27,7 @@ type BigCacheAdapter struct {
 	cache *bigcache.BigCache
 }
 
-func GetBigCache() CacheAdaptorServiceContract {
-	bigCache, _ := bigcache.New(context.Background(), bigcache.Config{
-		Shards:             1024,
-		LifeWindow:         time.Duration(time.Now().Add(time.Minute * 1).UnixNano()),
-		MaxEntriesInWindow: 1000 * 10 * 60,
-		MaxEntrySize:       500,
-		StatsEnabled:       false,
-		Verbose:            true,
-		HardMaxCacheSize:   0,
-	})
-	return &BigCacheAdapter{
-		cache: bigCache,
-	}
-}
-
-func (bigCache *BigCacheAdapter) Load(key string) (*CacheEntry, error) {
+func (bigCache *BigCacheAdapter) Load(key string) (*cache.CacheEntry, error) {
 	value, err := bigCache.cache.Get(key)
 	if err != nil {
 		return nil, err
@@ -55,7 +39,7 @@ func (bigCache *BigCacheAdapter) Load(key string) (*CacheEntry, error) {
 	return cacheEntry, nil
 }
 
-func (bigCache *BigCacheAdapter) Set(key string, cacheEntry *CacheEntry) error {
+func (bigCache *BigCacheAdapter) Set(key string, cacheEntry *cache.CacheEntry) error {
 	cacheValue, err := Serialize(cacheEntry)
 	if err != nil {
 		return err

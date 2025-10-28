@@ -16,9 +16,4 @@ var optionalBigCacheConfigs = []big_cache.OptionalBigCacheConfig{
 }
 
 var bigCache = big_cache.CreateBigCache(optionalBigCacheConfigs...)
-
-var toDoListCacheOptions = []cache.OptionalCacheConfigFunc{
-	cache.WithLoader(GetToDoLoader),
-	cache.WithStaleResponse(time.Second * 5),
-}
-var ToDoListStore = cache.GetCache(bigCache, CacheTTL, toDoListCacheOptions...)
+var ToDoListStore = cache.GetCache(bigCache, CacheTTL)

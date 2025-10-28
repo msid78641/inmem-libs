@@ -9,39 +9,43 @@ import (
 
 type loaderContract func(key string) (interface{}, error)
 type Cache struct {
-	cacheAdaptor     CacheAdaptorServiceContract
-	ttl              time.Duration
+	cacheAdaptor CacheAdaptorServiceContract
+	ttl          time.Duration
+	loaderGroup  singleflight.Group
+}
+
+type CacheOptions func(c *cacheOptionsConfig)
+
+type cacheOptionsConfig struct {
 	loader           loaderContract
 	staleResponseTtl time.Duration
-	loaderGroup      singleflight.Group
+	bypass           bool
 }
 
-type optionalCacheConfig struct {
-	loader        loaderContract
-	staleResponse time.Duration
-}
-
-type OptionalCacheConfigFunc func(c *Cache)
-
-func WithLoader(loader loaderContract) OptionalCacheConfigFunc {
-	return func(c *Cache) {
+func WithLoader(loader loaderContract) CacheOptions {
+	return func(c *cacheOptionsConfig) {
 		c.loader = loader
 	}
 }
 
-func WithStaleResponse(staleTtl time.Duration) OptionalCacheConfigFunc {
-	return func(c *Cache) {
+func WithStaleResponse(staleTtl time.Duration, loader loaderContract) CacheOptions {
+	return func(c *cacheOptionsConfig) {
 		c.staleResponseTtl = staleTtl
+		c.loader = loader
 	}
 }
-func GetCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration, options ...OptionalCacheConfigFunc) *Cache {
-	newCacheWithDefaultConfig := &Cache{
-		cacheAdaptor:     cacheAdaptor,
-		ttl:              ttl,
-		staleResponseTtl: 0,
+
+func WithByPass(bypass bool, loader loaderContract) CacheOptions {
+	return func(c *cacheOptionsConfig) {
+		c.bypass = bypass
+		c.loader = loader
 	}
-	for _, opt := range options {
-		opt(newCacheWithDefaultConfig)
+}
+
+func GetCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration) *Cache {
+	newCacheWithDefaultConfig := &Cache{
+		cacheAdaptor: cacheAdaptor,
+		ttl:          ttl,
 	}
 	return newCacheWithDefaultConfig
 }
@@ -57,39 +61,64 @@ func (ce *CacheEntry) isInValidEntry(buffer time.Duration) bool {
 	}
 	return false
 }
-func (c *Cache) Get(key string) (interface{}, error) {
-	val, err := c.cacheAdaptor.Get(key)
-	if err != nil {
-		isEntryNotFoundError := strings.Compare(err.Error(), "Entry not found") == 0
-		if isEntryNotFoundError {
-			fmt.Println("Entry not found loading from the loader key -> ", key)
-			return c.Load(key) // here since the entry is not found load it from live and send
+
+func getCacheOptions(options []CacheOptions) *cacheOptionsConfig {
+	var optionalConfig *cacheOptionsConfig
+	for _, option := range options {
+		option(optionalConfig)
+	}
+	return optionalConfig
+}
+func (c *Cache) Get(key string, options ...CacheOptions) (interface{}, error) {
+	optionalConfig := getCacheOptions(options)
+	if optionalConfig.bypass {
+		return c.load(key, optionalConfig.loader)
+	} else {
+		val, err := c.cacheAdaptor.Get(key)
+		if err != nil {
+			isEntryNotFoundError := strings.Compare(err.Error(), "Entry not found") == 0
+			if isEntryNotFoundError {
+				fmt.Println("Entry not found loading from the loader key -> ", key)
+				// if loader is present in the option else return the error
+				if optionalConfig.loader != nil {
+					val, err := c.load(key, optionalConfig.loader) // here since the entry is not found load it from live and send
+					if err != nil {
+						c.Set(key, val)
+					}
+					return val, err
+				}
+				return nil, nil
+			}
+			fmt.Println("Some error occurred while fetching from the in mem cache ", err)
+			return nil, err
+		} else if val.isInValidEntry(0) {
+
+			if optionalConfig.staleResponseTtl > 0 && val.isInValidEntry(optionalConfig.staleResponseTtl) {
+				fmt.Println("Deleting the invalid entry key -> ", key)
+				c.Delete(key)
+				return nil, nil
+			}
+			fmt.Println("Entry is invalid serving stale response with key -> ", key)
+			// here since the serve stale is set we should return the stale response but also load the value in background
+			newVal, err := c.load(key, optionalConfig.loader)
+			if err != nil {
+				c.Set(key, newVal)
+			}
+			return val.Value, nil
 		}
-		fmt.Println("Some error occurred while fetching from the in mem cache ", err)
-		return nil, err
-	} else if val.isInValidEntry(0) {
-		if val.isInValidEntry(c.staleResponseTtl) {
-			fmt.Println("Deleting the invalid entry key -> ", key)
-			c.Delete(key)
-			return nil, nil
-		}
-		fmt.Println("Entry is invalid serving stale response with key -> ", key)
-		go c.Load(key) // here since the serve stale is set we should return the stale response but also load the value in background
 		return val.Value, nil
 	}
-	return val.Value, nil
 }
 
-func (c *Cache) Load(key string) (interface{}, error) {
-	// Circuit breaker if the key is already been fetched do not fetch it again instead
+func (c *Cache) load(key string, loader loaderContract) (interface{}, error) {
+	//Only fetch a key once; if already being fetched, block other goroutines until the fetch completes.
 	v, err, _ := c.loaderGroup.Do(key, func() (interface{}, error) {
 		fmt.Println("Making use of loader for the key ", key)
-		val, err := c.loader(key)
+		val, err := loader(key)
 		if err != nil {
 			fmt.Println("Error resulted from the loader, loading the key ", key)
 			return nil, nil
 		}
-		c.Set(key, val)
 		return val, err
 	})
 	return v, err

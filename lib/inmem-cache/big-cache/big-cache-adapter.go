@@ -62,9 +62,6 @@ func (bigCache *BigCacheAdapter) Delete(key string) error {
 	}
 	return nil
 }
-func (bigCache *BigCacheAdapter) SoftDelete(key string) error {
-	return nil
-}
 
 //Note: BigCache Implementation Summary
 //BigCache is bigCache high-performance, in-memory cache library for Go designed to manage large datasets with minimal garbage collection (GC) overhead. It achieves this through several key architectural choices:

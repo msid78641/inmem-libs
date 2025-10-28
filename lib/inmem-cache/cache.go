@@ -16,22 +16,34 @@ type Cache struct {
 	loaderGroup      singleflight.Group
 }
 
-func GetCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration) *Cache {
-	return &Cache{
+type optionalCacheConfig struct {
+	loader        loaderContract
+	staleResponse time.Duration
+}
+
+type OptionalCacheConfigFunc func(c *Cache)
+
+func WithLoader(loader loaderContract) OptionalCacheConfigFunc {
+	return func(c *Cache) {
+		c.loader = loader
+	}
+}
+
+func WithStaleResponse(staleTtl time.Duration) OptionalCacheConfigFunc {
+	return func(c *Cache) {
+		c.staleResponseTtl = staleTtl
+	}
+}
+func GetCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration, options ...OptionalCacheConfigFunc) *Cache {
+	newCacheWithDefaultConfig := &Cache{
 		cacheAdaptor:     cacheAdaptor,
 		ttl:              ttl,
 		staleResponseTtl: 0,
 	}
-}
-
-func (c *Cache) WithLoader(loader loaderContract) *Cache {
-	c.loader = loader
-	return c
-}
-
-func (c *Cache) WithStaleResponseTtl(staleResponseTtl time.Duration) *Cache {
-	c.staleResponseTtl = staleResponseTtl
-	return c
+	for _, opt := range options {
+		opt(newCacheWithDefaultConfig)
+	}
+	return newCacheWithDefaultConfig
 }
 
 type CacheEntry struct {
@@ -51,12 +63,14 @@ func (c *Cache) Get(key string) (interface{}, error) {
 		isEntryNotFoundError := strings.Compare(err.Error(), "Entry not found") == 0
 		if isEntryNotFoundError {
 			fmt.Println("Entry not found loading from the loader key -> ", key)
-			return c.Load(key) // here since the enrty is not found load it from live and send
+			return c.Load(key) // here since the entry is not found load it from live and send
 		}
 		fmt.Println("Some error occurred while fetching from the in mem cache ", err)
 		return nil, err
 	} else if val.isInValidEntry(0) {
 		if val.isInValidEntry(c.staleResponseTtl) {
+			fmt.Println("Deleting the invalid entry key -> ", key)
+			c.Delete(key)
 			return nil, nil
 		}
 		fmt.Println("Entry is invalid serving stale response with key -> ", key)
@@ -82,12 +96,7 @@ func (c *Cache) Load(key string) (interface{}, error) {
 }
 
 func (c *Cache) Set(key string, val interface{}) error {
-	cacheEntry := &CacheEntry{Value: val, TTL: time.Duration(time.Now().Add(c.ttl).UnixNano())}
-	err := c.cacheAdaptor.Set(key, cacheEntry)
-	if err != nil {
-		// handle error
-	}
-	return nil
+	return c.setKeyValueWithCustomTtl(key, val, c.ttl)
 }
 
 func (c *Cache) Delete(key string) error {
@@ -98,7 +107,16 @@ func (c *Cache) Delete(key string) error {
 	return nil
 }
 func (c *Cache) SoftDelete(key string) error {
-	err := c.cacheAdaptor.SoftDelete(key)
+	val, err := c.Get(key)
+	if err != nil {
+		// handle error
+	}
+	return c.setKeyValueWithCustomTtl(key, val, 0)
+}
+
+func (c *Cache) setKeyValueWithCustomTtl(key string, value interface{}, ttl time.Duration) error {
+	cacheEntry := &CacheEntry{Value: value, TTL: time.Duration(time.Now().Add(ttl).UnixNano())}
+	err := c.cacheAdaptor.Set(key, cacheEntry)
 	if err != nil {
 		// handle error
 	}

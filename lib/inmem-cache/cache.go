@@ -28,17 +28,25 @@ func WithLoader(loader loaderContract) CacheOptions {
 	}
 }
 
-func WithStaleResponse(staleTtl time.Duration, loader loaderContract) CacheOptions {
+func WithStaleResponse(staleTtl time.Duration, options ...CacheOptions) CacheOptions {
 	return func(c *cacheOptionsConfig) {
 		c.staleResponseTtl = staleTtl
-		c.loader = loader
+		if len(options) > 0 {
+			for _, option := range options {
+				option(c)
+			}
+		}
 	}
 }
 
-func WithByPass(bypass bool, loader loaderContract) CacheOptions {
+func WithByPass(options ...CacheOptions) CacheOptions {
 	return func(c *cacheOptionsConfig) {
-		c.bypass = bypass
-		c.loader = loader
+		c.bypass = true
+		if len(options) > 0 {
+			for _, option := range options {
+				option(c)
+			}
+		}
 	}
 }
 
@@ -63,7 +71,7 @@ func (ce *CacheEntry) isInValidEntry(buffer time.Duration) bool {
 }
 
 func getCacheOptions(options []CacheOptions) *cacheOptionsConfig {
-	var optionalConfig *cacheOptionsConfig
+	var optionalConfig *cacheOptionsConfig = &cacheOptionsConfig{}
 	for _, option := range options {
 		option(optionalConfig)
 	}
@@ -76,14 +84,19 @@ func (c *Cache) Get(key string, options ...CacheOptions) (interface{}, error) {
 	} else {
 		val, err := c.cacheAdaptor.Get(key)
 		if err != nil {
+			fmt.Println(err.Error())
 			isEntryNotFoundError := strings.Compare(err.Error(), "Entry not found") == 0
 			if isEntryNotFoundError {
 				fmt.Println("Entry not found loading from the loader key -> ", key)
 				// if loader is present in the option else return the error
 				if optionalConfig.loader != nil {
 					val, err := c.load(key, optionalConfig.loader) // here since the entry is not found load it from live and send
-					if err != nil {
-						c.Set(key, val)
+					if err == nil {
+						err := c.Set(key, val)
+						if err != nil {
+							fmt.Println("Setting error ", err)
+							return nil, err
+						}
 					}
 					return val, err
 				}
@@ -92,8 +105,7 @@ func (c *Cache) Get(key string, options ...CacheOptions) (interface{}, error) {
 			fmt.Println("Some error occurred while fetching from the in mem cache ", err)
 			return nil, err
 		} else if val.isInValidEntry(0) {
-
-			if optionalConfig.staleResponseTtl > 0 && val.isInValidEntry(optionalConfig.staleResponseTtl) {
+			if val.isInValidEntry(optionalConfig.staleResponseTtl) {
 				fmt.Println("Deleting the invalid entry key -> ", key)
 				c.Delete(key)
 				return nil, nil

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	CacheTTL = time.Second * 3
+	CacheTTL = time.Second * 1
 )
 
 var optionalBigCacheConfigs = []big_cache.OptionalBigCacheConfig{

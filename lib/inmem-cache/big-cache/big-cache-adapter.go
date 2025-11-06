@@ -44,12 +44,16 @@ func (bigCache *BigCacheAdapter) Get(key string) (*cache.CacheEntry, error) {
 }
 
 func (bigCache *BigCacheAdapter) Set(key string, cacheEntry *cache.CacheEntry) error {
+	fmt.Println("Set has been called for key ", key)
 	cacheValue, err := Serialize(cacheEntry)
 	if err != nil {
+		fmt.Println("Serializing err ", err.Error())
 		return err
 	}
 	err = bigCache.cache.Set(key, cacheValue)
+	fmt.Println("Set value for key ", key)
 	if err != nil {
+		fmt.Println("Printing setting err ", err.Error())
 		return err
 	}
 	return nil
@@ -60,9 +64,6 @@ func (bigCache *BigCacheAdapter) Delete(key string) error {
 	if err != nil {
 		return err
 	}
-	return nil
-}
-func (bigCache *BigCacheAdapter) SoftDelete(key string) error {
 	return nil
 }
 

@@ -2,6 +2,7 @@ package big_cache
 
 import (
 	"context"
+	"fmt"
 	"github.com/allegro/bigcache/v3"
 	"time"
 )
@@ -14,46 +15,46 @@ type BigCacheConfig struct {
 	cacheMemoryLimit int
 }
 
-func CreateBigCache() *BigCacheConfig {
-	return &BigCacheConfig{
-		shards:           4,
-		lifeWindow:       -1,
-		enableStats:      false,
-		verbose:          false,
-		cacheMemoryLimit: 10,
+type OptionalBigCacheConfig func(b *bigcache.Config)
+
+func WithShards(shards int) OptionalBigCacheConfig {
+	return func(b *bigcache.Config) {
+		b.Shards = shards
 	}
 }
 
-func (b *BigCacheConfig) Shards(shards int) *BigCacheConfig {
-	b.shards = shards
-	return b
-}
-func (b *BigCacheConfig) LifeWindow(lifeWindow time.Duration) *BigCacheConfig {
-	b.lifeWindow = lifeWindow
-	return b
-}
-func (b *BigCacheConfig) EnableStats(enableStats bool) *BigCacheConfig {
-	b.enableStats = enableStats
-	return b
-}
-func (b *BigCacheConfig) Verbose(verbose bool) *BigCacheConfig {
-	b.verbose = verbose
-	return b
+func WithEnableStats(enableStats bool) OptionalBigCacheConfig {
+	return func(b *bigcache.Config) {
+		b.StatsEnabled = enableStats
+	}
 }
 
-func (b *BigCacheConfig) CacheMemoryLimit(memoryLimit int) *BigCacheConfig {
-	b.cacheMemoryLimit = memoryLimit
-	return b
+func WithCacheMemoryLimit(cacheMemoryLimit int) OptionalBigCacheConfig {
+	return func(b *bigcache.Config) {
+		b.HardMaxCacheSize = cacheMemoryLimit
+	}
+}
+func WithVerbose(verbose bool) OptionalBigCacheConfig {
+	return func(b *bigcache.Config) {
+		b.Verbose = verbose
+	}
 }
 
-func (b *BigCacheConfig) Build() *BigCacheAdapter {
-	bigCache, _ := bigcache.New(context.Background(), bigcache.Config{
-		Shards:           b.shards,
-		LifeWindow:       b.lifeWindow, // BigCache doesn't evict with jitter. The caching layer must implement TTL to add jitter
-		StatsEnabled:     b.enableStats,
-		Verbose:          b.verbose,
-		HardMaxCacheSize: b.cacheMemoryLimit,
-	})
+func CreateBigCache(optionalBigCacheConfigs ...OptionalBigCacheConfig) *BigCacheAdapter {
+	cfg := bigcache.Config{
+		Shards:           4,
+		LifeWindow:       time.Second * 1000,
+		StatsEnabled:     false,
+		Verbose:          false,
+		HardMaxCacheSize: 1000,
+		OnRemove: func(key string, entry []byte) {
+			fmt.Println("key has been removed by big cache ", key)
+		},
+	}
+	for _, option := range optionalBigCacheConfigs {
+		option(&cfg)
+	}
+	bigCache, _ := bigcache.New(context.Background(), cfg)
 	return &BigCacheAdapter{
 		cache: bigCache,
 	}

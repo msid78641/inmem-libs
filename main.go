@@ -24,7 +24,7 @@ func fetchToDos() {
 			cacheOptions := []cache.CacheOptions{
 				cache.WithByPass(cache.WithLoader(to_do.GetToDoLoader)),
 				cache.WithLoader(to_do.GetToDoLoader),
-				cache.WithStaleResponse(time.Second*50, cache.WithLoader(to_do.GetToDoLoader)),
+				cache.WithStaleResponse(time.Second*0, cache.WithLoader(to_do.GetToDoLoader)),
 			}
 			val, _ := to_do.ToDoListStore.Get(strconv.Itoa(i), cacheOptions...)
 			if val != nil {
@@ -41,12 +41,30 @@ func fetchToDos() {
 	fmt.Println("Hit Count -> ", hitCounter.Load(), " , Miss Count -> ", missCounter.Load())
 }
 
+func softDelete() {
+	waitGroup := sync.WaitGroup{}
+	for i := range 100 {
+		i = (i % 100) + 1
+		waitGroup.Add(1)
+		go func() {
+			to_do.ToDoListStore.SoftDelete(strconv.Itoa(i))
+			fmt.Println("Entry soft deleted ")
+			waitGroup.Done()
+		}()
+	}
+	waitGroup.Wait()
+}
 func main() {
 	fmt.Println("Fetching the to dos from the cache")
 	go func() {
-		for range 50 {
+		for range 1 {
 			fetchToDos()
-			time.Sleep(time.Second * 1)
+		}
+		for range 1 {
+			softDelete()
+		}
+		for range 1 {
+			fetchToDos()
 		}
 	}()
 	fmt.Println("Starting server on :8080...")

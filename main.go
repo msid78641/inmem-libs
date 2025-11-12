@@ -56,17 +56,7 @@ func softDelete() {
 }
 func main() {
 	fmt.Println("Fetching the to dos from the cache")
-	go func() {
-		for range 1 {
-			fetchToDos()
-		}
-		for range 1 {
-			softDelete()
-		}
-		for range 1 {
-			fetchToDos()
-		}
-	}()
+	to_do.RunTests()
 	fmt.Println("Starting server on :8080...")
 	// 2. Start the HTTP server
 	log.Fatal(http.ListenAndServe(":8081", nil))

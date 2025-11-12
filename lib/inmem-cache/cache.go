@@ -223,7 +223,14 @@ func (c *Cache) Delete(deleteOpts ...DeleteOptions) (deletionRes *DeletionResult
 		}
 	}
 	if c.deleteThreshold.Load() > 20 {
-		go c.cleanupMapOnThreshold()
+		c.loaderGroup.Do("cleanup", func() (interface{}, error) {
+			c.cleanupMapOnThreshold()
+			c.deleteThreshold.Store(0)
+			return nil, nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	return deletionRes, deletionError
 }
@@ -276,6 +283,5 @@ func (c *Cache) cleanupMapOnThreshold() {
 			delete(c.tags, tagKey)
 		}
 	}
-
 	fmt.Println("Mock clean up close ")
 }

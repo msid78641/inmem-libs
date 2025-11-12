@@ -2,6 +2,7 @@ package big_cache
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/allegro/bigcache/v3"
 	cache "inmem/lib/inmem-cache"
@@ -10,9 +11,7 @@ import (
 func Serialize(cacheEntry *cache.CacheEntry) ([]byte, error) {
 	val, err := json.Marshal(*cacheEntry)
 	if err != nil {
-		fmt.Println("Marhsalling error")
 		return nil, err
-		// handle error
 	}
 	return val, nil
 }
@@ -21,7 +20,6 @@ func Deserialize(cacheEntrySerialized []byte) (*cache.CacheEntry, error) {
 	var cacheEntry cache.CacheEntry
 	err := json.Unmarshal(cacheEntrySerialized, &cacheEntry)
 	if err != nil {
-		fmt.Println("Error via desiralizing ", err)
 		return nil, err
 	}
 	return &cacheEntry, nil
@@ -34,26 +32,23 @@ type BigCacheAdapter struct {
 func (bigCache *BigCacheAdapter) Get(key string) (*cache.CacheEntry, error) {
 	value, err := bigCache.cache.Get(key)
 	if err != nil {
-		return nil, err
+		return nil, getError(err)
 	}
 	cacheEntry, err := Deserialize(value)
 	if err != nil {
-		return nil, err
+		return nil, cache.WrapError(
+			fmt.Sprintf("failed to unmarshal cache entry key : %s value : %s ", key, string(value)), err)
 	}
 	return cacheEntry, nil
 }
 
 func (bigCache *BigCacheAdapter) Set(key string, cacheEntry *cache.CacheEntry) error {
-	fmt.Println("Set has been called for key ", key)
 	cacheValue, err := Serialize(cacheEntry)
 	if err != nil {
-		fmt.Println("Serializing err ", err.Error())
-		return err
+		return cache.WrapError(fmt.Sprintf("failed to marshal cache entry key : %s", key), err)
 	}
 	err = bigCache.cache.Set(key, cacheValue)
-	fmt.Println("Set value for key ", key)
 	if err != nil {
-		fmt.Println("Printing setting err ", err.Error())
 		return err
 	}
 	return nil
@@ -62,9 +57,16 @@ func (bigCache *BigCacheAdapter) Set(key string, cacheEntry *cache.CacheEntry) e
 func (bigCache *BigCacheAdapter) Delete(key string) error {
 	err := bigCache.cache.Delete(key)
 	if err != nil {
-		return err
+		return getError(err)
 	}
 	return nil
+}
+
+func getError(err error) error {
+	if errors.Is(err, bigcache.ErrEntryNotFound) {
+		return cache.ErrEntryNotFound
+	}
+	return err
 }
 
 //Note: BigCache Implementation Summary

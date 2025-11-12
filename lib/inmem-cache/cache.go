@@ -1,9 +1,9 @@
 package inmem_cache
 
 import (
+	"errors"
 	"fmt"
 	"golang.org/x/sync/singleflight"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +49,11 @@ func WithStaleResponse(staleTtl time.Duration, options ...CacheOptions) CacheOpt
 type deleteOptionsConfig struct {
 	tags []string
 	keys []string
+}
+
+type DeletionResult struct {
+	Success []string
+	Failed  []error
 }
 
 func DeleteWithKeys(keys []string) DeleteOptions {
@@ -110,67 +115,66 @@ func getCacheOptions(options []CacheOptions) *cacheOptionsConfig {
 	return optionalConfig
 }
 func (c *Cache) Get(key string, options ...CacheOptions) (res interface{}, err error) {
+	defer func() {
+		if err != nil {
+			err = cacheError(GET, key, err)
+		}
+	}()
 	optionalConfig := getCacheOptions(options)
 	if optionalConfig.bypass {
-		return c.load(key, optionalConfig.loader)
-	} else {
-		val, err := c.cacheAdaptor.Get(key)
-		if err != nil {
-			fmt.Println(err.Error())
-			isEntryNotFoundError := strings.Compare(err.Error(), "Entry not found") == 0
-			if isEntryNotFoundError {
-				fmt.Println("Entry not found loading from the loader key -> ", key)
-				// if loader is present in the option else return the error
-				if optionalConfig.loader != nil {
-					val, err := c.load(key, optionalConfig.loader) // here since the entry is not found load it from live and send
-					if err == nil {
-						err := c.Set(key, val)
-						if err != nil {
-							fmt.Println("Setting error ", err)
-							return nil, err
-						}
-					}
-					return val, err
-				}
-				return nil, nil
-			}
-			fmt.Println("Some error occurred while fetching from the in mem cache ", err)
-			return nil, err
-		} else if val.isInValidEntry(0) {
-			if val.isInValidEntry(optionalConfig.staleResponseTtl) {
-				fmt.Println("Deleting the invalid entry key -> ", key)
-				c.Delete()
-				return nil, nil
-			}
-			fmt.Println("Entry is invalid serving stale response with key -> ", key)
-			// here since the serve stale is set we should return the stale response but also load the value in background
-			newVal, err := c.load(key, optionalConfig.loader)
-			if err != nil {
-				c.Set(key, newVal)
-			}
-			return val.Value, nil
+		if optionalConfig.loader == nil {
+			return nil, ErrLoaderNil
 		}
-		return val.Value, nil
+		return c.load(key, optionalConfig.loader)
 	}
+	val, err := c.cacheAdaptor.Get(key)
+	if err != nil {
+		if !errors.Is(err, ErrEntryNotFound) {
+			return nil, err
+		}
+		if optionalConfig.loader == nil {
+			return nil, ErrEntryNotFound
+		}
+		fmt.Println("Entry not found loading from the loader key -> ", key)
+		return c.loadAndSet(key, optionalConfig.loader)
+	} else if val.isInValidEntry(0) {
+		if optionalConfig.loader == nil || val.isInValidEntry(optionalConfig.staleResponseTtl) {
+			c.Delete(DeleteWithKeys([]string{key}))
+			return nil, ErrStaleResponse
+		}
+		fmt.Println("Entry is invalid serving stale response with key -> ", key)
+		// here since the serve stale is set we should return the stale response but also load the value in background
+		return c.loadAndSet(key, optionalConfig.loader)
+	}
+	return val.Value, nil
 }
 
+func (c *Cache) loadAndSet(key string, loader loaderContract) (interface{}, error) {
+	newVal, err := c.load(key, loader)
+	if err == nil {
+		return nil, ErrLoaderFailed
+	}
+	c.Set(key, newVal)
+	return newVal, nil
+}
 func (c *Cache) load(key string, loader loaderContract) (interface{}, error) {
 	//Only fetch a key once; if already being fetched, block other goroutines until the fetch completes.
 	v, err, _ := c.loaderGroup.Do(key, func() (interface{}, error) {
 		fmt.Println("Making use of loader for the key ", key)
 		val, err := loader(key)
-		if err != nil {
-			fmt.Println("Error resulted from the loader, loading the key ", key)
-			return nil, nil
-		}
 		return val, err
 	})
 	return v, err
 }
 
-func (c *Cache) Set(key string, val any, keyTags ...string) error {
-	err := c.setKeyValueWithCustomTtl(key, val, c.ttl)
-	if err != nil {
+func (c *Cache) Set(key string, val any, keyTags ...string) (err error) {
+	defer func() {
+		if err != nil {
+			err = cacheError(SET, key, err)
+		}
+	}()
+	err = c.setKeyValueWithCustomTtl(key, val, c.ttl)
+	if err == nil {
 		for _, tag := range keyTags {
 			c.tagsMutex.Lock()
 			if c.tags[tag] == nil {
@@ -182,42 +186,71 @@ func (c *Cache) Set(key string, val any, keyTags ...string) error {
 	}
 	return err
 }
-func (c *Cache) Delete(deleteOpts ...DeleteOptions) error {
+func (c *Cache) Delete(deleteOpts ...DeleteOptions) (deletionRes *DeletionResult, err error) {
+	defer func() {
+		if err != nil {
+			err = cacheError(DELETE, "", err)
+		}
+	}()
 	deleteConfig := getDeleteOptionConfig(deleteOpts)
 	keys := []string{}
+	var deletionError error
+	deletionRes = &DeletionResult{
+		Failed:  []error{},
+		Success: []string{},
+	}
 	if len(deleteConfig.keys) > 0 {
 		keys = deleteConfig.keys
 		c.deleteThreshold.Add(1)
 	} else if len(deleteConfig.tags) > 0 {
 		keys = c.getKeysByTag(deleteConfig.tags)
+		fmt.Println("Deleteing below keys because of the tag map keys ", keys)
+	} else {
+		return nil, ErrInvalidDeletionArgs
 	}
 	for _, key := range keys {
-		c.cacheAdaptor.Delete(key)
+		err = c.cacheAdaptor.Delete(key)
+		if err != nil {
+			cacheError := &CacheError{
+				Operation: DELETE,
+				Key:       key,
+				BaseError: err,
+			}
+			deletionError = errors.Join(deletionError, cacheError)
+			deletionRes.Failed = append(deletionRes.Failed, cacheError)
+		} else {
+			deletionRes.Success = append(deletionRes.Success, key)
+		}
 	}
 	if c.deleteThreshold.Load() > 20 {
 		go c.cleanupMapOnThreshold()
 	}
-	return nil
+	return deletionRes, deletionError
 }
-func (c *Cache) SoftDelete(key string) error {
+func (c *Cache) SoftDelete(key string) (err error) {
+	defer func() {
+		if err != nil {
+			err = cacheError(SOFTDELETE, "", err)
+		}
+	}()
 	val, err := c.Get(key)
 	if err != nil {
-		// handle error
+		if errors.Is(err, ErrEntryNotFound) {
+			return ErrEntryNotFound
+		}
+		return err
 	}
-	fmt.Println("Soft deleiting the entry for key ", key)
+	fmt.Println("Soft deleting the entry for key ", key)
 	return c.setKeyValueWithCustomTtl(key, val, 0)
 }
 
 func (c *Cache) setKeyValueWithCustomTtl(key string, value interface{}, ttl time.Duration) error {
 	cacheEntry := &CacheEntry{Value: value, TTL: time.Duration(time.Now().Add(ttl).UnixNano())}
-	err := c.cacheAdaptor.Set(key, cacheEntry)
-	if err != nil {
-		// handle error
-	}
-	return nil
+	return c.cacheAdaptor.Set(key, cacheEntry)
 }
 
 func (c *Cache) getKeysByTag(tags []string) []string {
+	fmt.Println(c.tags)
 	keys := []string{}
 	for _, tag := range tags {
 		keys = append(keys, c.tags[tag]...)
@@ -226,16 +259,23 @@ func (c *Cache) getKeysByTag(tags []string) []string {
 }
 
 func (c *Cache) cleanupMapOnThreshold() {
+	fmt.Println("Mock clean up woke up")
 	defer c.tagsMutex.Unlock()
 	c.tagsMutex.Lock()
-	keysToBeDeleted := []string{}
-	for _, keys := range c.tags {
+	for tagKey, keys := range c.tags {
+		updatedKeys := []string{}
 		for _, key := range keys {
 			_, err := c.Get(key)
-			if err != nil {
-				keysToBeDeleted = append(keysToBeDeleted, key)
+			if !errors.Is(err, ErrEntryNotFound) {
+				updatedKeys = append(updatedKeys, key)
 			}
 		}
+		if len(updatedKeys) > 0 {
+			c.tags[tagKey] = updatedKeys
+		} else {
+			delete(c.tags, tagKey)
+		}
 	}
-	c.Delete(DeleteWithKeys(keysToBeDeleted))
+
+	fmt.Println("Mock clean up close ")
 }

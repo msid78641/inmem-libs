@@ -2,7 +2,6 @@ package big_cache
 
 import (
 	"context"
-	"fmt"
 	"github.com/allegro/bigcache/v3"
 	"time"
 )
@@ -47,9 +46,6 @@ func CreateBigCache(optionalBigCacheConfigs ...OptionalBigCacheConfig) *BigCache
 		StatsEnabled:     false,
 		Verbose:          false,
 		HardMaxCacheSize: 1000,
-		OnRemove: func(key string, entry []byte) {
-			fmt.Println("key has been removed by big cache ", key)
-		},
 	}
 	for _, option := range optionalBigCacheConfigs {
 		option(&cfg)

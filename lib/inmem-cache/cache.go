@@ -2,7 +2,6 @@ package inmem_cache
 
 import (
 	"errors"
-	"fmt"
 	"golang.org/x/sync/singleflight"
 	"sync"
 	"sync/atomic"
@@ -17,6 +16,7 @@ type Cache struct {
 	tags            map[string][]string
 	tagsMutex       sync.Mutex
 	deleteThreshold atomic.Int32
+	stats           *CacheStats
 }
 
 type CacheOptions func(c *cacheOptionsConfig)
@@ -91,6 +91,7 @@ func GetCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration) *Cach
 		cacheAdaptor: cacheAdaptor,
 		ttl:          ttl,
 		tags:         make(map[string][]string),
+		stats:        InitStats(),
 	}
 	return newCacheWithDefaultConfig
 }
@@ -130,22 +131,25 @@ func (c *Cache) Get(key string, options ...CacheOptions) (res interface{}, err e
 	val, err := c.cacheAdaptor.Get(key)
 	if err != nil {
 		if !errors.Is(err, ErrEntryNotFound) {
+			c.stats.Miss()
 			return nil, err
 		}
 		if optionalConfig.loader == nil {
+			c.stats.Miss()
 			return nil, ErrEntryNotFound
 		}
-		fmt.Println("Entry not found loading from the loader key -> ", key)
 		return c.loadAndSet(key, optionalConfig.loader)
 	} else if val.isInValidEntry(0) {
+		c.stats.Stale()
 		if optionalConfig.loader == nil || val.isInValidEntry(optionalConfig.staleResponseTtl) {
+			c.stats.Evict()
 			c.Delete(DeleteWithKeys([]string{key}))
 			return nil, ErrStaleResponse
 		}
-		fmt.Println("Entry is invalid serving stale response with key -> ", key)
 		// here since the serve stale is set we should return the stale response but also load the value in background
 		return c.loadAndSet(key, optionalConfig.loader)
 	}
+	c.stats.Hit()
 	return val.Value, nil
 }
 
@@ -158,12 +162,14 @@ func (c *Cache) loadAndSet(key string, loader loaderContract) (interface{}, erro
 	return newVal, nil
 }
 func (c *Cache) load(key string, loader loaderContract) (interface{}, error) {
+	startTime := time.Now()
 	//Only fetch a key once; if already being fetched, block other goroutines until the fetch completes.
 	v, err, _ := c.loaderGroup.Do(key, func() (interface{}, error) {
-		fmt.Println("Making use of loader for the key ", key)
 		val, err := loader(key)
+		c.stats.LoadCount()
 		return val, err
 	})
+	c.stats.LoadTime(time.Since(startTime))
 	return v, err
 }
 
@@ -175,6 +181,7 @@ func (c *Cache) Set(key string, val any, keyTags ...string) (err error) {
 	}()
 	err = c.setKeyValueWithCustomTtl(key, val, c.ttl)
 	if err == nil {
+		c.stats.EntriesCount()
 		for _, tag := range keyTags {
 			c.tagsMutex.Lock()
 			if c.tags[tag] == nil {
@@ -204,13 +211,13 @@ func (c *Cache) Delete(deleteOpts ...DeleteOptions) (deletionRes *DeletionResult
 		c.deleteThreshold.Add(1)
 	} else if len(deleteConfig.tags) > 0 {
 		keys = c.getKeysByTag(deleteConfig.tags)
-		fmt.Println("Deleteing below keys because of the tag map keys ", keys)
 	} else {
 		return nil, ErrInvalidDeletionArgs
 	}
 	for _, key := range keys {
 		err = c.cacheAdaptor.Delete(key)
 		if err != nil {
+			c.stats.DeleteMiss()
 			cacheError := &CacheError{
 				Operation: DELETE,
 				Key:       key,
@@ -219,6 +226,7 @@ func (c *Cache) Delete(deleteOpts ...DeleteOptions) (deletionRes *DeletionResult
 			deletionError = errors.Join(deletionError, cacheError)
 			deletionRes.Failed = append(deletionRes.Failed, cacheError)
 		} else {
+			c.stats.DeleteHit()
 			deletionRes.Success = append(deletionRes.Success, key)
 		}
 	}
@@ -247,7 +255,6 @@ func (c *Cache) SoftDelete(key string) (err error) {
 		}
 		return err
 	}
-	fmt.Println("Soft deleting the entry for key ", key)
 	return c.setKeyValueWithCustomTtl(key, val, 0)
 }
 
@@ -257,7 +264,6 @@ func (c *Cache) setKeyValueWithCustomTtl(key string, value interface{}, ttl time
 }
 
 func (c *Cache) getKeysByTag(tags []string) []string {
-	fmt.Println(c.tags)
 	keys := []string{}
 	for _, tag := range tags {
 		keys = append(keys, c.tags[tag]...)
@@ -266,7 +272,7 @@ func (c *Cache) getKeysByTag(tags []string) []string {
 }
 
 func (c *Cache) cleanupMapOnThreshold() {
-	fmt.Println("Mock clean up woke up")
+	c.stats.InvalidateTag()
 	defer c.tagsMutex.Unlock()
 	c.tagsMutex.Lock()
 	for tagKey, keys := range c.tags {
@@ -283,5 +289,8 @@ func (c *Cache) cleanupMapOnThreshold() {
 			delete(c.tags, tagKey)
 		}
 	}
-	fmt.Println("Mock clean up close ")
+}
+
+func (c *Cache) GetStats() *CacheStats {
+	return c.stats
 }

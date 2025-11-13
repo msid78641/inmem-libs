@@ -56,7 +56,7 @@ func softDelete() {
 }
 func main() {
 	fmt.Println("Fetching the to dos from the cache")
-	to_do.RunTests()
+	to_do.TestCacheMixedTraffic5kQPS()
 	fmt.Println("Starting server on :8080...")
 	// 2. Start the HTTP server
 	log.Fatal(http.ListenAndServe(":8081", nil))

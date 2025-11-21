@@ -1,11 +1,9 @@
 package logger
 
-import "inmem/lib/logger"
-
-func GetDispatcher() logger.LogDispatcher {
+func GetDispatcher() LogDispatcher {
 	// Should be changed to switch case
 	//if _, ok := config["fileDispatcher"]; ok {
 	//	return GetFileDispatcher("asfasf")
 	//}
-	return GetConsoleDispatcher()
+	return GetFileDispatcher("logs/app.log")
 }

@@ -1,6 +1,9 @@
 package logger
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Level string
 
@@ -22,9 +25,13 @@ func (l *LogEntry) WithMessage(msg string) *LogEntry {
 	l.Msg = msg
 	return l
 }
-
-func (l *LogEntry) WithField(key, value string) *LogEntry {
+func (l *LogEntry) WithField(key string, value string) *LogEntry {
 	l.Fields[key] = value
+	return l
+}
+
+func (l *LogEntry) WithFieldMap(value map[string]string) *LogEntry {
+	l.Fields = value
 	return l
 }
 func (l *LogEntry) withTime(time time.Time) *LogEntry {
@@ -35,4 +42,15 @@ func (l *LogEntry) withTime(time time.Time) *LogEntry {
 func (l *LogEntry) withLevel(level Level) *LogEntry {
 	l.Level = level
 	return l
+}
+
+func (l *LogEntry) string() string {
+	val, _ := json.Marshal(l)
+	return string(val)
+}
+
+func WithEntry() *LogEntry {
+	return &LogEntry{
+		Fields: map[string]string{},
+	}
 }

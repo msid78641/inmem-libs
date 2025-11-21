@@ -1,9 +1,12 @@
 package logger
 
 import (
-	logger "inmem/lib/logger/internal"
 	"time"
 )
+
+type LogEntryType interface {
+	string | *LogEntry
+}
 
 type LogDispatcher interface {
 	Dispatch(l *LogEntry)
@@ -14,9 +17,23 @@ type Logger struct {
 }
 
 var l = &Logger{
-	logDispatcher: logger.GetDispatcher(),
+	logDispatcher: GetDispatcher(),
 }
 
-func Dispatch(logLevel Level, logEntry *LogEntry) {
-	l.logDispatcher.Dispatch(logEntry.withTime(time.Now()).withLevel(logLevel))
+func getLogEntry[T LogEntryType](le T) *LogEntry {
+	var logEntry *LogEntry = nil
+	switch x := any(le).(type) {
+	case string:
+		logEntry = WithEntry().WithMessage(x)
+	case *LogEntry:
+		logEntry = x
+	}
+	return logEntry
+}
+
+func Dispatch[T LogEntryType](logLevel Level, le T) {
+	logEntry := getLogEntry(le).
+		withTime(time.Now()).
+		withLevel(logLevel)
+	l.logDispatcher.Dispatch(logEntry)
 }

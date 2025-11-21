@@ -2,7 +2,6 @@ package logger
 
 import (
 	"fmt"
-	"inmem/lib/logger"
 	"time"
 )
 
@@ -17,22 +16,22 @@ const (
 	ColorWhite  = "\033[37m"
 )
 
-func colorForLevel(level logger.Level) string {
+func colorForLevel(level Level) string {
 	switch level {
-	case logger.ERROR:
+	case ERROR:
 		return ColorRed
-	case logger.WARN:
+	case WARN:
 		return ColorYellow
-	case logger.INFO:
+	case INFO:
 		return ColorGreen
-	case logger.DEBUG:
+	case DEBUG:
 		return ColorBlue
 	default:
 		return ColorWhite
 	}
 }
 
-func FormatLog(entry *logger.LogEntry) string {
+func FormatLog(entry *LogEntry) string {
 	color := colorForLevel(entry.Level)
 
 	// Convert fields map to "key=value key=value"
@@ -42,11 +41,13 @@ func FormatLog(entry *logger.LogEntry) string {
 	}
 
 	return fmt.Sprintf(
-		"%s[%s] [%s] %s%s",
+		"%s[%s] : [%s] : %s : %s",
 		color,
 		entry.Time.Format(time.RFC3339),
 		entry.Level,
 		entry.Msg,
+		fields,
+		ColorReset,
 	)
 }
 
@@ -56,6 +57,6 @@ type ConsoleDispatcher struct {
 func GetConsoleDispatcher() *ConsoleDispatcher {
 	return new(ConsoleDispatcher)
 }
-func (cd *ConsoleDispatcher) Dispatch(l *logger.LogEntry) {
+func (cd *ConsoleDispatcher) Dispatch(l *LogEntry) {
 	fmt.Println(FormatLog(l))
 }

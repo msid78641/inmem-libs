@@ -1,0 +1,25 @@
+filebeat.inputs:
+  - type: filestream
+    id: custom-logs
+    enabled: true
+    paths:
+      - /Users/vivek.yada/mnet/temp/inmem/logs/*.log
+
+# ❗ Remove json.* since we are manually parsing
+# json.keys_under_root: true
+# json.add_error_key: truex
+
+# Enable ILM + templates (data streams)
+setup.ilm.enabled: true
+setup.template.enabled: true
+
+output.elasticsearch:
+  hosts: ["http://localhost:9200"]
+  username: "elastic"
+  password: "somerandompass134"
+  # Required for data streams
+  data_stream:
+    enabled: true
+
+setup.kibana:
+  host: "localhost:5601"

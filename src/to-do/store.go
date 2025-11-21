@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	CacheTTL = time.Second * 1
+	CacheTTL = time.Second * 5
 )
 
 var optionalBigCacheConfigs = []big_cache.OptionalBigCacheConfig{
@@ -16,4 +16,4 @@ var optionalBigCacheConfigs = []big_cache.OptionalBigCacheConfig{
 }
 
 var bigCache = big_cache.CreateBigCache(optionalBigCacheConfigs...)
-var ToDoListStore = cache.GetCache(bigCache, CacheTTL)
+var ToDoListStore = cache.GetCache(bigCache, CacheTTL, true)

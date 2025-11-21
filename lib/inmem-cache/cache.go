@@ -1,8 +1,10 @@
 package inmem_cache
 
 import (
+	"encoding/json"
 	"errors"
 	"golang.org/x/sync/singleflight"
+	"inmem/lib/logger"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,7 +36,6 @@ func WithLoader(loader loaderContract) CacheOptions {
 		c.loader = loader
 	}
 }
-
 func WithStaleResponse(staleTtl time.Duration, options ...CacheOptions) CacheOptions {
 	return func(c *cacheOptionsConfig) {
 		c.staleResponseTtl = staleTtl
@@ -86,12 +87,14 @@ func WithByPass(options ...CacheOptions) CacheOptions {
 	}
 }
 
-func GetCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration) *Cache {
+func GetCache(cacheAdaptor CacheAdaptorServiceContract, ttl time.Duration, stats bool) *Cache {
 	newCacheWithDefaultConfig := &Cache{
 		cacheAdaptor: cacheAdaptor,
 		ttl:          ttl,
 		tags:         make(map[string][]string),
-		stats:        InitStats(),
+	}
+	if stats {
+		newCacheWithDefaultConfig.stats = InitStats()
 	}
 	return newCacheWithDefaultConfig
 }
@@ -119,6 +122,10 @@ func (c *Cache) Get(key string, options ...CacheOptions) (res interface{}, err e
 	defer func() {
 		if err != nil {
 			err = cacheError(GET, key, err)
+			logger.Dispatch(logger.ERROR, logger.WithEntry().
+				WithMessage(err.Error()).
+				WithField("key", key).
+				WithField("op", "get"))
 		}
 	}()
 	optionalConfig := getCacheOptions(options)
@@ -177,6 +184,10 @@ func (c *Cache) Set(key string, val any, keyTags ...string) (err error) {
 	defer func() {
 		if err != nil {
 			err = cacheError(SET, key, err)
+			logger.Dispatch(logger.ERROR, logger.WithEntry().
+				WithMessage(err.Error()).
+				WithField("key", key).
+				WithField("op", "set"))
 		}
 	}()
 	err = c.setKeyValueWithCustomTtl(key, val, c.ttl)
@@ -197,6 +208,11 @@ func (c *Cache) Delete(deleteOpts ...DeleteOptions) (deletionRes *DeletionResult
 	defer func() {
 		if err != nil {
 			err = cacheError(DELETE, "", err)
+			temp, _ := json.Marshal(deletionRes)
+			logger.Dispatch(logger.ERROR, logger.WithEntry().
+				WithMessage(err.Error()).
+				WithField("keys", string(temp)).
+				WithField("op", "delete"))
 		}
 	}()
 	deleteConfig := getDeleteOptionConfig(deleteOpts)
